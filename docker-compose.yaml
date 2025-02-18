@@ -1,5 +1,7 @@
-services:
+version: '3.8'
 
+services:
+  # Zabbix server service
   server:
     image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
     ports:
@@ -27,7 +29,13 @@ services:
       - ZBX_HOUSEKEEPINGFREQUENCY=1
       - ZBX_MAXHOUSEKEEPERDELETE=5000
       - ZBX_PROXYCONFIGFREQUENCY=3600
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
+  # Zabbix Web Interface with NGINX and PostgreSQL
   web-nginx-pgsql:
     image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
     ports:
@@ -58,7 +66,13 @@ services:
       - ZBX_POSTMAXSIZE=64M
       - PHP_TZ=Europe/Madrid
       - ZBX_MAXEXECUTIONTIME=500
-      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Zabbix agent service
   agent:
     image: zabbix/zabbix-agent2:alpine-7.0-latest
     ports:
@@ -77,7 +91,13 @@ services:
       - server
     environment:
       - ZBX_SERVER_HOST=server
-      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # SNMP trap service
   snmptraps:
     image: zabbix/zabbix-snmptraps:alpine-7.0-latest
     ports:
@@ -89,7 +109,13 @@ services:
       - server
     environment:
       - ZBX_SERVER_HOST=server
-      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # PostgreSQL service for Zabbix
   postgres-server:
     image: postgres:16-alpine
     volumes:
@@ -104,5 +130,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      
-     
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
