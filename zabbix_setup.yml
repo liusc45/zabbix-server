@@ -1,0 +1,217 @@
+---
+  - name: Set up Zabbix with Nginx and Docker
+    hosts: all
+    become: yes
+    vars:
+      zabbix_version: "alpine-7.0-latest"
+      zabbix_web_port: "8080"
+      nginx_config_file: "/etc/nginx/sites-available/zabbix"
+      ssl_certificate_path: "/etc/letsencrypt/live/{{ ansible_default_ipv4.address }}/fullchain.pem"
+      ssl_certificate_key_path: "/etc/letsencrypt/live/{{ ansible_default_ipv4.address }}/privkey.pem"
+      server_ip: "{{ ansible_default_ipv4.address }}"  # Use the direct IP address of the server
+  
+    tasks:
+      - name: Update apt cache
+        apt:
+          update_cache: yes
+  
+      - name: Install required packages
+        apt:
+          name:
+            - docker.io
+            - docker-compose
+            - nginx
+            - certbot
+            - python3-certbot-nginx
+          state: present
+  
+      - name: Install Git
+        apt:
+          name: git
+          state: present
+  
+      - name: Clone the Zabbix server repository
+        git:
+          repo: https://github.com/liusc45/zabbix-server.git
+          dest: /opt/zabbix-server
+  
+      - name: Copy docker-compose file from repository
+        copy:
+          src: /opt/zabbix-server/docker-compose.yaml
+          dest: /opt/zabbix-server/docker-compose.yaml
+  
+      - name: Start Zabbix with Docker Compose
+        command:
+          cmd: docker-compose up -d
+          chdir: /opt/zabbix-server
+  
+      - name: Set up Nginx configuration for Zabbix
+        copy:
+          dest: "{{ nginx_config_file }}"
+          content: |
+            server {
+                # Listen for requests on your IP address.
+                server_name {{ server_ip }};
+  
+                location / {
+                    # Proxy all requests to web running on port 8080
+                    proxy_pass http://localhost:{{ zabbix_web_port }};
+                    
+                    # Pass on information about the requests to the proxied service using headers
+                    proxy_set_header HOST $host;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                }
+  
+                listen 443 ssl; # managed by Certbot
+                ssl_certificate {{ ssl_certificate_path }}; # managed by Certbot
+                ssl_certificate_key {{ ssl_certificate_key_path }}; # managed by Certbot
+                include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+            }
+  
+            server {
+                if ($host = {{ server_ip }}) {
+                    return 301 https://$host$request_uri;
+                } # managed by Certbot
+  
+                server_name {{ server_ip }};
+                listen 80;
+                return 404; # managed by Certbot
+            }
+  
+      - name: Enable the Zabbix site in Nginx
+        command:
+          cmd: ln -s /etc/nginx/sites-available/zabbix /etc/nginx/sites-enabled/zabbix
+  
+      - name: Test Nginx configuration
+        command:
+          cmd: nginx -t
+  
+      - name: Restart Nginx service
+        service:
+          name: nginx
+          state: restarted
+  
+      - name: Request SSL certificate with Certbot
+        command:
+          cmd: certbot --nginx -d {{ server_ip }}
+          creates: "/etc/letsencrypt/live/{{ server_ip }}/fullchain.pem"
+  
+      - name: Start Docker containers again if needed
+        command:
+          cmd: docker-compose up -d
+          chdir: /opt/zabbix-server
+  
+      - name: Output Zabbix login info
+        debug:
+          msg: "Access Zabbix web interface at https://{{ server_ip }} with user 'Admin' and password 'zabbix'"
+  
+      - name: Display Installation Guide
+        debug:
+          msg: |
+            # Zabbix Server Docker Installation Guide
+            ## Prerequisites
+            - Docker and Docker Compose installed
+            - A domain name (if using SSL)
+            - Root or sudo access to your server
+  
+            ## Installation Steps
+  
+            ### 1. Clone the Repository
+            ```bash
+            git clone https://github.com/liusc45/zabbix-server.git
+            cd zabbix-server
+            ```
+  
+            ### 2. Start Docker Services
+            Launch Zabbix, PostgreSQL, and Nginx containers:
+            ```bash
+            docker-compose up -d
+            ```
+  
+            ### 3. Nginx Configuration
+  
+            #### a. Configure Nginx
+            Create and edit the Nginx configuration file:
+            ```bash
+            sudo nano /etc/nginx/sites-available/zabbix
+            ```
+  
+            Add the following configuration:
+            ```nginx
+            server {
+                server_name {{ server_ip }};
+                
+                location / {
+                    proxy_pass http://localhost:{{ zabbix_web_port }};
+                    
+                    proxy_set_header HOST $host;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                }
+                
+                listen 443 ssl; # managed by Certbot
+                ssl_certificate /etc/letsencrypt/live/{{ server_ip }}/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/{{ server_ip }}/privkey.pem;
+                include /etc/letsencrypt/options-ssl-nginx.conf;
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+            }
+  
+            server {
+                if ($host = {{ server_ip }}) {
+                    return 301 https://$host$request_uri;
+                }
+                
+                server_name {{ server_ip }};
+                listen 80;
+                return 404;
+            }
+            ```
+  
+            #### b. Enable the Site
+            Create a symbolic link:
+            ```bash
+            sudo ln -s /etc/nginx/sites-available/zabbix /etc/nginx/sites-enabled/zabbix
+            ```
+  
+            #### c. Verify Configuration
+            Test Nginx configuration:
+            ```bash
+            sudo nginx -t
+            ```
+  
+            #### d. Apply Changes
+            Restart Nginx service:
+            ```bash
+            sudo systemctl restart nginx
+            ```
+  
+            ### 4. SSL Configuration (Optional)
+            Configure HTTPS using Certbot:
+            ```bash
+            sudo certbot --nginx -d {{ server_ip }}
+            ```
+  
+            ### 5. Access Zabbix Interface
+            - HTTP: `http://localhost:8080`
+            - HTTPS: `https://{{ server_ip }}` (if SSL configured)
+  
+            ### 6. Default Credentials
+            Access the Zabbix web interface with:
+            - Username: `Admin`
+            - Password: `zabbix`
+  
+            ### 7. Container Management
+            Stop all containers:
+            ```bash
+            docker-compose down
+            ```
+  
+            ## Security Notes
+            - Change the default admin password after first login
+            - Configure firewall rules to restrict access to necessary ports
+            - Regularly update containers for security patches
+  
